@@ -161,69 +161,7 @@ class EchoBot(fp.PoeBot):
                 mojo_request, "Mojo_Infinity", request.access_key
             ):
                 yield msg
-        
-        elif last_message.startswith("/fireworks"):
-            lines = last_message.split("\n")
-            prompt = lines[0][11:].strip()
 
-            
-            negative_prompt = None
-            height = None
-            width = None
-            cfg_scale = None
-            sampler = None
-            samples = None
-            seed = None
-            steps = None
-            safety_check = None
-            output_image_format = None
-
-            for line in lines[1:]:
-                line = line.strip()
-                if line.startswith("Negative Prompt:"):
-                    negative_prompt = line.split(":", 1)[1].strip()
-                elif line.startswith("Height:"):
-                    height = int(line.split(":", 1)[1].strip())
-                elif line.startswith("Width:"):
-                    width = int(line.split(":", 1)[1].strip())
-                elif line.startswith("CFG Scale:"):
-                    cfg_scale = float(line.split(":", 1)[1].strip())
-                elif line.startswith("Sampler:"):
-                    sampler = line.split(":", 1)[1].strip()
-                elif line.startswith("Samples:"):
-                    samples = int(line.split(":", 1)[1].strip())
-                elif line.startswith("Seed:"):
-                    seed = int(line.split(":", 1)[1].strip())
-                elif line.startswith("Steps:"):
-                    steps = int(line.split(":", 1)[1].strip())
-                elif line.startswith("Safety Check:"):
-                    safety_check_value = line.split(":", 1)[1].strip().lower()
-                    safety_check = safety_check_value == "true"
-                elif line.startswith("Output Image Format:"):
-                    output_image_format = line.split(":", 1)[1].strip()
-                    if output_image_format not in ["JPEG", "PNG"]:
-                        output_image_format = "JPEG"
-
-            try:
-                api_key = os.environ["FIREWORKS_API_KEY"]  
-                logger.info(f"Generating image using Fireworks AI API for prompt: {prompt}")
-                logger.info(f"Negative prompt: {negative_prompt}")
-                image_data, filename = await self.generate_fireworks_image(
-                    prompt, api_key, negative_prompt, height, width, cfg_scale, sampler, samples, seed, steps, safety_check, output_image_format
-                )
-
-                await self.post_message_attachment(
-                    message_id=request.message_id,
-                    file_data=image_data,
-                    filename=filename
-                )
-
-                response_text = "Image generated using Fireworks AI API and attached."
-                yield fp.PartialResponse(text=response_text)
-            except Exception as e:
-                logger.exception("An exception occurred during Fireworks AI image generation:")
-                response_text = f"Error: {str(e)}"
-                yield fp.PartialResponse(text=response_text)
         
         else:
             logger.info("Forwarding request to GPT-3.5-Turbo")
@@ -302,49 +240,6 @@ class EchoBot(fp.PoeBot):
             logger.error(f"Error response from Stability AI API: {response.text}")
             raise Exception(response.text)
         
-    async def generate_fireworks_image(self, prompt, api_key, negative_prompt=None, height=None, width=None, cfg_scale=None, sampler=None, samples=None, seed=None, steps=None, safety_check=None, output_image_format=None):
-
-        try:
-            import fireworks.client
-            from fireworks.client.image import ImageInference, Answer
-
-            
-            fireworks.client.api_key = api_key
-            inference_client = ImageInference(model="stable-diffusion-xl-1024-v1-0")
-
-            if output_image_format is None:
-                output_image_format = "JPEG"  
-            
-            
-            answer: Answer = await inference_client.text_to_image_async(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                cfg_scale=cfg_scale if cfg_scale is not None else 7.0,
-                height=height if height is not None else 1024,  
-                width=width if width is not None else 1024,  
-                sampler=sampler,
-                steps=steps if steps is not None else 50,  
-                seed=seed if seed is not None else 0,  
-                safety_check=safety_check if safety_check is not None else True,  
-                output_image_format=output_image_format
-            )
-
-            if answer.image is None:
-                raise RuntimeError(f"No return image, {answer.finish_reason}")
-            else:
-                current_date = datetime.now().strftime('%Y/%m/%d')  
-                timestamp = int(time.time())
-                filename = f"{current_date}/fireworks_generated_image_{timestamp}.{output_image_format.lower()}"
-
-                logger.info(f"Successful response from Fireworks AI API")
-                logger.info(f"Generated image filename: {filename}")
-
-                return answer.image, filename
-
-        except Exception as e:
-            logger.error(f"Error generating image with Fireworks AI API: {e}")
-            raise
-        
     async def get_settings(self, setting: fp.SettingsRequest) -> fp.SettingsResponse:
         return fp.SettingsResponse(
             server_bot_dependencies={"GPT-3.5-Turbo": 1, "ReversePromptGuide": 1, "PoorMansPrompts": 1, "Mojo_Infinity": 1},
@@ -356,7 +251,7 @@ Removing this part for brevity.
                             
         )
 
-REQUIREMENTS = ["fastapi-poe==0.0.36", "requests", "fireworks-ai"]
+REQUIREMENTS = ["fastapi-poe==0.0.36", "requests"]
 image = Image.debian_slim().pip_install(*REQUIREMENTS)
 stub = Stub("echobot-poe")
 
