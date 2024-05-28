@@ -1,13 +1,11 @@
 
 import os
-import requests
 from typing import AsyncIterable
 import fastapi_poe as fp
 from modal import Image, Stub, asgi_app, Secret
 import logging
 import time
-from datetime import datetime
-from urllib.parse import urlparse
+from utils import generate_image
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,67 +28,7 @@ class EchoBot(fp.PoeBot):
         logger.info(f"Last Message: {last_message}")
 
         if last_message.startswith("/generate"):
-            lines = last_message.split("\n")
-            prompt = lines[0][10:].strip()
-
-            negative_prompt = None
-            image = None
-            strength = None
-            model = None
-            seed = None
-            output_format = None  
-            aspect_ratio = None
-
-            for line in lines[1:]:
-                line = line.strip()
-                if line.startswith("Negative Prompt:"):
-                    negative_prompt = line.split(":", 1)[1].strip()
-                elif line.startswith("Strength:"):
-                    strength = float(line.split(":", 1)[1].strip())
-                elif line.startswith("Model:"):
-                    model = line.split(":", 1)[1].strip()
-                elif line.startswith("Seed:"):
-                    seed = int(line.split(":", 1)[1].strip())
-                elif line.startswith("Output Format:"):
-                    output_format = line.split(":", 1)[1].strip()
-                elif line.startswith("Aspect Ratio:"):
-                    aspect_ratio = line.split(":", 1)[1].strip()
-
-            if request.query[-1].attachments:
-                attachment = request.query[-1].attachments[0]
-                attachment_url = attachment.url
-                response = requests.get(attachment_url)
-                if response.status_code == 200:
-                    image = response.content
-                else:
-                    raise Exception(f"Failed to download attachment from URL: {attachment_url}")
-                
-                
-                if strength is None:
-                    strength = 0.5
-            else:
-                image = None
-
-            try:
-                api_key = os.environ["STABILITY_API_KEY"] 
-                logger.info(f"Generating image for prompt: {prompt}")
-                logger.info(f"Negative prompt: {negative_prompt}")
-                image_data, filename = self.generate_image(
-                    prompt, api_key, negative_prompt, image, strength, model, seed, output_format, aspect_ratio
-                )
-
-                await self.post_message_attachment(
-                    message_id=request.message_id,
-                    file_data=image_data,
-                    filename=filename
-                )
-
-                response_text = "Image generated and attached."
-                yield fp.PartialResponse(text=response_text)
-            except Exception as e:
-                logger.exception("An exception occurred during image generation:")
-                response_text = str(e)
-                yield fp.PartialResponse(text=response_text)
+            await self.handle_generate_command(request)
                 
         elif last_message.startswith("/enhance"):
             input_text = last_message[9:] 
@@ -183,62 +121,68 @@ class EchoBot(fp.PoeBot):
         execution_time = end_time - start_time
         logger.info(f"Request processed in {execution_time:.2f} seconds")
         
-    def generate_image(self, prompt, api_key, negative_prompt=None, image=None, strength=None, model=None, seed=None, output_format=None, aspect_ratio=None):
+    async def handle_generate_command(self, request: fp.QueryRequest):
+        last_message = request.query[-1].content
+        lines = last_message.split("\n")
+        prompt = lines[0][10:].strip()
 
-        data = {
-            "prompt": prompt,
-            "model": model,
-            "seed": seed,
-        }
+        negative_prompt = None
+        image = None
+        strength = None
+        model = None
+        seed = None
+        output_format = None
+        aspect_ratio = None
 
-        if output_format:
-            data["output_format"] = output_format
+        for line in lines[1:]:
+            line = line.strip()
+            if line.startswith("Negative Prompt:"):
+                negative_prompt = line.split(":", 1)[1].strip()
+            elif line.startswith("Strength:"):
+                strength = float(line.split(":", 1)[1].strip())
+            elif line.startswith("Model:"):
+                model = line.split(":", 1)[1].strip()
+            elif line.startswith("Seed:"):
+                seed = int(line.split(":", 1)[1].strip())
+            elif line.startswith("Output Format:"):
+                output_format = line.split(":", 1)[1].strip()
+            elif line.startswith("Aspect Ratio:"):
+                aspect_ratio = line.split(":", 1)[1].strip()
 
-        if negative_prompt:
-            data["negative_prompt"] = negative_prompt
+        if request.query[-1].attachments:
+            attachment = request.query[-1].attachments[0]
+            attachment_url = attachment.url
+            response = requests.get(attachment_url)
+            if response.status_code == 200:
+                image = response.content
+            else:
+                raise Exception(f"Failed to download attachment from URL: {attachment_url}")
 
-        if aspect_ratio:
-            data["aspect_ratio"] = aspect_ratio
-
-        files = {"none": ''}
-
-        if image:
-            data["mode"] = "image-to-image"
-            data["strength"] = strength
-            files["image"] = ("image.png", image, "image/png")
+            if strength is None:
+                strength = 0.5
         else:
-            data["mode"] = "text-to-image"
+            image = None
 
-        logger.info(f"Request data: {data}")
+        try:
+            api_key = os.environ["STABILITY_API_KEY"]
+            logger.info(f"Generating image for prompt: {prompt}")
+            logger.info(f"Negative prompt: {negative_prompt}")
+            image_data, filename = generate_image(
+                prompt, api_key, negative_prompt, image, strength, model, seed, output_format, aspect_ratio
+            )
 
-        
-        if model == "sd":
-            endpoint = "https://api.stability.ai/v2beta/stable-image/generate/core"
-        else:
-            endpoint = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
+            await self.post_message_attachment(
+                message_id=request.message_id,
+                file_data=image_data,
+                filename=filename
+            )
 
-        response = requests.post(
-            endpoint,
-            headers={
-                "authorization": f"Bearer {api_key}",
-                "accept": "image/*"
-            },
-            files=files,
-            data=data,
-        )
-
-        if response.status_code == 200:
-            output_format = output_format or "jpeg"  
-            current_date = datetime.now().strftime('%Y/%m/%d') 
-            timestamp = int(time.time())
-            filename = f"{current_date}/generated_image_{timestamp}.{output_format}"
-            logger.info(f"Successful response from Stability AI API")
-            logger.info(f"Generated image filename: {filename}")
-
-            return response.content, filename
-        else:
-            logger.error(f"Error response from Stability AI API: {response.text}")
-            raise Exception(response.text)
+            response_text = "Image generated and attached."
+            yield fp.PartialResponse(text=response_text)
+        except Exception as e:
+            logger.exception("An exception occurred during image generation:")
+            response_text = str(e)
+            yield fp.PartialResponse(text=response_text)
         
     async def get_settings(self, setting: fp.SettingsRequest) -> fp.SettingsResponse:
         return fp.SettingsResponse(
