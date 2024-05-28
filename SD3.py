@@ -1,5 +1,6 @@
 
 import os
+import requests
 from typing import AsyncIterable
 import fastapi_poe as fp
 from modal import Image, Stub, asgi_app, Secret
